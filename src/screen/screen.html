@@ -1,0 +1,85 @@
+<html>
+    <head>
+        <title>Backstage</title>
+    </head>
+    <body>
+        <div class="ink-primary base-regular">
+            <div id="otp-view" class="view">
+                <div class="title">Pair your phone</div>
+                <div class="content">
+                    <div class="hero center-col" id="co-hero">
+                        <div id="qr"></div>
+                        <div class="ink-tertiary base-light size-xs" style="font-size: 0.75rem;">
+                            Or visit <span class="ink-blue" id="co-url">link</span> on your phone.
+                        </div>
+                    </div>
+                    <div style="padding:0.2rem 0.9rem">
+                        <div class="size-l base-light ink-primary" style="padding-bottom: 1rem;">Scan the QR code</div>
+                        <div>
+                            <div class="row">
+                                <span>Interface</span><span id="co-en">Default</span>
+                            </div>
+                            <div class="row">
+                                <span>IP address</span><span id="co-ip">Unkown</span>
+                            </div>
+                            <div class="row">
+                                <span>Port</span><span id="co-port">Default</span>
+                            </div>
+                            <div class="row">
+                                <span>OTP</span><span id="co-otp">Not set</span>
+                            </div>
+                        </div>
+                        <div style="height: 1.5rem;"></div>
+                        <div id="btn-disable" class="button rounded bordered grey">Disable</div>
+                    </div>
+                </div>
+            </div>
+            <div id="stopped-view" class="view center-col">
+                <div class="icon size-xxl">🔒</div>
+                <br/>
+                <div class="size-s base-light ink-secondary">
+                    Backstage is disabled
+                </div>
+                <br/>
+                <div id="btn-enable" class="button rounded bordered">Enable</div>
+            </div>
+            <div id="client-view" class="view">
+                <div class="title">Your device is connected</div>
+                <div class="content">
+                    <div class="hero center-col" id="cl-hero" style="font-size: 13rem;">📱</div>
+                    <div style="padding:0.2rem 0.9rem">
+                        <div class="size-l base-light ink-primary" id="cl-name" style="padding-bottom: 1.2rem;">Generic Device</div>
+                        <div>
+                            <div class="row">
+                                <span>Device Id</span><span id="cl-id">none</span>
+                            </div>
+                            <div class="row">
+                                <span>Browser</span><span id="cl-browser">Unkown</span>
+                            </div>
+                            <div class="row">
+                                <span>OS</span><span id="cl-os">Unkown</span>
+                            </div>
+                            <div class="row">
+                                <span>IP address</span><span id="cl-ip">Unkown</span>
+                            </div>
+                            <div class="row">
+                                <span>Paired on</span><span id="cl-time">Unkown</span>
+                            </div>
+                        </div>
+                        <div style="height: 1.5rem;"></div>
+                        <div id="btn-forget" class="button rounded bordered red">Forget</div>
+                    </div>
+                </div>
+            </div>
+            <div id="loading-view" class="view center-col active">
+                <div class="size-xl">🖥</div>
+                <h2>
+                    <div class="ink-grey base-light size-s">Setting up</div>
+                    Backstage
+                </h2>
+                <br/>
+                <p class="ink-tertiary base-semilight">Loading..</p>
+            </div>
+        </div>
+    </body>
+</html>
