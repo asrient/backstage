@@ -7,9 +7,41 @@ import { promisify } from 'util';
 import { networkInterfaces, tmpdir } from 'os';
 const formidable = require('formidable');
 const fs = joplin.require('fs-extra');
+const sqlite3 = joplin.require('sqlite3');
 const path = require('path');
 
 const defaultInterfaces = ['eth0', 'wlan0', 'en0', 'en1', 'Wi-Fi',];
+
+class DbManager{
+	db = null;
+	constructor(filePath:string){
+		this.db = new sqlite3.Database(filePath);
+		this.db.getSync = promisify(this.db.get.bind(this.db));
+		this.db.runSync = promisify(this.db.run.bind(this.db));
+	}
+	getConfig = async (key:string) => {
+		const sql = `select value from config where key = '${key}'`;
+		const result = await this.db.getSync(sql);
+		if(!!result){
+			const val = result.value;
+			return JSON.parse(val);
+		}
+		return null;
+	}
+	setConfig = async (key:string, value:any) => {
+		console.log('setting config', key, value);
+		const sql = `insert OR replace into config values(?, ?)`;
+		const r = await this.db.runSync(sql, key, JSON.stringify(value));
+		console.log('set config result', r);
+	}
+	removeConfig = async (key:string) => {
+		const sql = `delete from config where key = ?`;
+		await this.db.runSync(sql, key);
+	}
+	init = async () =>{
+		await this.db.runSync('CREATE TABLE IF NOT EXISTS config (key TEXT UNIQUE, value TEXT)');
+	}
+}
 
 function detectClientInfo(userAgent: string) {
 	const ua = userAgent;
@@ -340,15 +372,17 @@ class BS_Server extends BaseServer {
 	otp = null;
 	authKey = null;
 	otpNextRefresh = 0;
+	db: DbManager = null;
 	_timeoutId = null;
 	// Override
 	onUpload = (data: uploadData) => { }
 	onClientConnected = (clientInfo: any) => { }
 	onClientDisconnected = (clientInfo: any) => { }
 	onOtpRefresh = (otp: string) => { }
-	constructor(info: any) {
+	constructor(info: any, db: DbManager) {
 		super(info.port, path.join(info.installDir, 'client'));
 		this.info = info;
+		this.db = db;
 	}
 	verifyAuth = (req: HttpRequest) => {
 		if (!this.clientConnected && this.otp) {
@@ -376,6 +410,9 @@ class BS_Server extends BaseServer {
 					const res = detectClientInfo(ua);
 					this.clientDeviceInfo = { ...this.clientDeviceInfo, ...res };
 				}
+				this.db.setConfig('clientInfo', this.clientDeviceInfo);
+				this.db.setConfig('authKey', this.authKey);
+				this.db.setConfig('lastPing', this.lastPing);
 				this.onClientConnected(this.clientDeviceInfo);
 				return true;
 			}
@@ -423,6 +460,7 @@ class BS_Server extends BaseServer {
 				return;
 			}
 			res.setCookie('bs-key', this.authKey);
+			res.setCookie('Max-Age', '7775999'); // 3 months
 			this._serveFolder(res, '/index.html');
 			return;
 		}
@@ -432,6 +470,7 @@ class BS_Server extends BaseServer {
 			case '/ping':
 				this.lastPing = Date.now();
 				res.apiRespond(200, { message: 'pong', clientInfo: this.clientDeviceInfo });
+				this.db.setConfig('lastPing', this.lastPing);
 				break;
 			case '/upload':
 				if (req.method == 'POST') {
@@ -506,12 +545,12 @@ class BS_Server extends BaseServer {
 		this.clientDeviceInfo = null;
 		this.lastPing = 0;
 		this.otpNextRefresh = 0;
+		this.db.removeConfig('clientInfo');
+		this.db.removeConfig('lastPing');
+		this.db.removeConfig('authKey');
 		if (_clientInfo)
 			this.onClientDisconnected(_clientInfo);
 		this.refresh();
-	}
-	get clientInfo() {
-		return {}
 	}
 	start = async () => {
 		console.info('Starting Base server...');
@@ -533,8 +572,21 @@ class BS_Server extends BaseServer {
 			console.error('Cannot stop server, stopped already', this);
 		}
 	}
-	loadState = async (db) => {
+	loadState = async () => {
 		// load previoulsy paired devices from db
+		const clientInfo = await this.db.getConfig('clientInfo');
+		const authKey = await this.db.getConfig('authKey');
+		const lastPing = await this.db.getConfig('lastPing');
+		if(!!clientInfo && !!authKey && !!lastPing) {
+			console.log('retrived client info', clientInfo, authKey, lastPing);
+			this.clientDeviceInfo = clientInfo;
+			this.authKey = authKey;
+			this.lastPing = lastPing;
+			this.clientConnected = true;
+		}
+		else{
+			console.log('no client found in db', clientInfo, authKey, lastPing);
+		}
 	}
 }
 
@@ -547,9 +599,11 @@ class Backstage {
 	isDisabled = false;
 	serviceStartedOn = 0;
 	currentNote = null;
+	db: DbManager = null;
 	constructor(info: any) {
 		this.info = info;
-		this.server = new BS_Server(this.info);
+		this.db = new DbManager(path.join(this.info.dataDir, 'backstage.db'));
+		this.server = new BS_Server(this.info, this.db);
 		this.server.onUpload = this.onUpload;
 		this.server.onError = this.onError;
 		this.server.onServerStart = this.onServerStart;
@@ -560,10 +614,12 @@ class Backstage {
 		this.load();
 	}
 	sendDialogEvent = (event: string, data: object = {}) => {
-		joplin.views.panels.postMessage(this.dialogHandle, {
-			...data,
-			type: event,
-		});
+		if(this.dialogHandle) {
+			joplin.views.panels.postMessage(this.dialogHandle, {
+				...data,
+				type: event,
+			});
+		}
 	}
 	onOtpRefresh = (otp: string) => {
 		this.sendDialogEvent('otpRefresh', { otp });
@@ -736,16 +792,17 @@ class Backstage {
 			onStart: async () => {
 				console.info('Backstage plugin loaded');
 				this.pluginLoaded = true;
-				await this.loadViews();
+				await this.db.init();
 				joplin.workspace.onNoteSelectionChange(async (event: any) => {
 					console.log('note selection changed', event);
 					this.getCurrentNote();
 				});
-				await this.server.loadState({}); //
+				await this.server.loadState();
 				if(this.server.clientConnected){
 					console.log('starting server since we have a client');
 					this.startService();
 				}
+				await this.loadViews();
 			},
 		});
 	}
