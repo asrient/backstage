@@ -125,7 +125,12 @@ class HttpRequest {
 		const request = this._request;
 		return new Promise((resolve, reject) => {
 			if (this.mayContainFiles) {
-				const form = formidable({ multiples: true, uploadDir: tmpdir(), baseDir: global.__dirname });
+				const form = formidable({ 
+					multiples: true, 
+					uploadDir: tmpdir(), 
+					baseDir: global.__dirname,
+					keepExtensions: true,
+				});
 				form.parse(request, function (err, fields: any, files: any) {
 					if (err) {
 						console.error(err.message);
@@ -231,7 +236,7 @@ class BaseServer {
 	}
 	onServerStart = () => { }
 	onServerStop = () => { }
-	onRequest(req: HttpRequest, res: HttpResponse) { }
+	async onRequest(req: HttpRequest, res: HttpResponse) { }
 	constructor(port: number, publicDir?: string) {
 		this.port = port;
 		if (publicDir) this.publicDir = publicDir;
@@ -290,14 +295,21 @@ class BaseServer {
 		this._sendFile(res, filePath, contentType);
 	}
 	_requestHandler = async (req: IncomingMessage, res: ServerResponse) => {
-		const request = new HttpRequest(req);
-		const response = new HttpResponse(res);
-		console.info('request', request.url);
-		await request.load();
-		this.onRequest(request, response);
-		if (response.isSent || response.isHandeled) return;
-		console.info('about to serve public folder', this.publicDir);
-		this._serveFolder(response, request.url, 'index.html');
+		try{
+			const request = new HttpRequest(req);
+			const response = new HttpResponse(res);
+			console.info('request', request.url);
+			await request.load();
+			await this.onRequest(request, response);
+			if (response.isSent || response.isHandeled) return;
+			console.info('about to serve public folder', this.publicDir);
+			this._serveFolder(response, request.url, 'index.html');
+		}
+		catch(e){
+			console.error('Server error', e);
+			res.writeHead(500, { 'Content-Type': 'text/html' });
+			res.end('Internal Server Error\n'+e.toString());
+		}
 	}
 	async start() {
 		console.info('Starting Base server...');
@@ -328,7 +340,6 @@ class BS_Server extends BaseServer {
 	otp = null;
 	authKey = null;
 	otpNextRefresh = 0;
-	nextSleep = 0;
 	_timeoutId = null;
 	// Override
 	onUpload = (data: uploadData) => { }
@@ -339,20 +350,17 @@ class BS_Server extends BaseServer {
 		super(info.port, path.join(info.installDir, 'client'));
 		this.info = info;
 	}
-	setNextSleep = () => {
-		console.info('setting next sleep', this.info.sleepAfter);
-		this.nextSleep = Date.now() + this.info.sleepAfter;
-	}
 	verifyAuth = (req: HttpRequest) => {
 		if (!this.clientConnected && this.otp) {
 			console.log('verifying otp', req.getData, this.otp);
 			if (req.getData['otp'] == this.otp) {
 				console.info('Otp verified', this.otp);
 				this.otp = null;
+				this.otpNextRefresh = 0;
 				this.authKey = randomBytes(10).toString('hex');
 				this.clientConnected = true;
 				this.lastPing = Date.now();
-				// todo: gather client info
+				// gather client info
 				let address = req._request.socket.remoteAddress;
 				this.clientDeviceInfo = {
 					deviceId: randomBytes(3).toString('hex'),
@@ -386,32 +394,28 @@ class BS_Server extends BaseServer {
 		if (!this.active) {
 			console.log('Backstage server not active, reseting state');
 			this.otp = null;
-			if (this.clientConnected)
-				this.removeClient();
+			this.otpNextRefresh = 0;
 			if (this._timeoutId) clearTimeout(this._timeoutId);
 			return;
 		}
 		if (!this.clientConnected) {
-			if (this.nextSleep <= Date.now()) {
-				console.warn('Sleep timeout');
-				this.stop();
-				return;
-			}
 			if (Date.now() >= this.otpNextRefresh) {
 				this.resetOtp();
 			}
 		}
 		else {
-			if (Date.now() >= this.lastPing + (1000 * 60 * 3)) {
-				console.info('Client not responding, removing client');
+			if (Date.now() >= this.lastPing + (this.info.clientExpireAfter || 1000 * 60 * 3)) { 
+				console.info('Client is inactive for a long time, removing client');
 				this.removeClient();
-				this.resetOtp();
 			}
 		}
 		if (this._timeoutId) clearTimeout(this._timeoutId);
-		this._timeoutId = setTimeout(this.refresh, 30 * 1000);
+		let nextRefresh = 30 * 1000; // we will regenerate otp
+		if(this.clientConnected) 
+		nextRefresh = 5*60*1000; // 5 mins, we will check for client expiry
+		this._timeoutId = setTimeout(this.refresh, nextRefresh);
 	}
-	onRequest = (req: HttpRequest, res: HttpResponse) => {
+	onRequest = async (req: HttpRequest, res: HttpResponse) => {
 		if (req.url == '/') {
 			res.isHandeled = true;
 			if (!this.verifyAuth(req)) {
@@ -502,7 +506,6 @@ class BS_Server extends BaseServer {
 		this.clientDeviceInfo = null;
 		this.lastPing = 0;
 		this.otpNextRefresh = 0;
-		this.setNextSleep();
 		if (_clientInfo)
 			this.onClientDisconnected(_clientInfo);
 		this.refresh();
@@ -513,7 +516,6 @@ class BS_Server extends BaseServer {
 	start = async () => {
 		console.info('Starting Base server...');
 		await super.start.bind(this)();
-		this.setNextSleep();
 		this.refresh();
 	}
 	resetPort = async (port) => {
@@ -531,6 +533,9 @@ class BS_Server extends BaseServer {
 			console.error('Cannot stop server, stopped already', this);
 		}
 	}
+	loadState = async (db) => {
+		// load previoulsy paired devices from db
+	}
 }
 
 class Backstage {
@@ -539,6 +544,7 @@ class Backstage {
 	info = null;
 	dialogHandle = null;
 	isDialogOpen = false;
+	isDisabled = false;
 	serviceStartedOn = 0;
 	currentNote = null;
 	constructor(info: any) {
@@ -600,23 +606,27 @@ class Backstage {
 	onClientDisconnected = (clientInfo: any) => {
 		console.info('Client disconnected', clientInfo);
 		this.sendDialogEvent('clientDisconnected', { clientInfo });
+		if(!this.isDialogOpen){
+			this.stopService();
+		}
 	}
 	onClientConnected = (clientInfo: any) => {
 		console.info('Client connected', clientInfo);
 		this.sendDialogEvent('clientConnected', { clientInfo });
 	}
 	showDialog = async () => {
-		if (!this.server.active) {
+		if (!this.server.active&&!this.isDisabled) {
 			this.startService();
-		}
-		else {
-			this.server.setNextSleep();
 		}
 		const dialogs = joplin.views.dialogs;
 		this.isDialogOpen = true;
 		const result = await dialogs.open(this.dialogHandle);
 		this.isDialogOpen = false;
 		console.info('Dialog result: ' + JSON.stringify(result));
+		// Dialog closed, stop server if no client is connected
+		if(this.server.active && !this.server.clientConnected){
+			this.stopService();
+		}
 	}
 	loadViews = async () => {
 		await joplin.commands.register({
@@ -668,10 +678,12 @@ class Backstage {
 				this.server.removeClient();
 			}
 			else if (msg.type === 'stopServer') {
+				this.isDisabled = true;
 				await this.stopService();
 				return true;
 			}
 			else if (msg.type === 'startServer') {
+				this.isDisabled = false;
 				await this.startService();
 				return true;
 			}
@@ -704,7 +716,7 @@ class Backstage {
 			note.body += `\n${link}\n`;
 			const updated = await joplin.data.put(['notes', note.id], null, { body: note.body });
 			console.log('note updated', updated);
-			// Hack: force a refresh of the note since not does not rerender on update, 
+			// Hack: force a refresh of the note since note does not rerender on update automatically, 
 			// https://github.com/laurent22/joplin/issues/5955
 			await joplin.commands.execute("editor.setText", note.body);
 		}
@@ -729,6 +741,11 @@ class Backstage {
 					console.log('note selection changed', event);
 					this.getCurrentNote();
 				});
+				await this.server.loadState({}); //
+				if(this.server.clientConnected){
+					console.log('starting server since we have a client');
+					this.startService();
+				}
 			},
 		});
 	}
@@ -739,7 +756,7 @@ async function run() {
 		deviceInfo: {},
 		installDir: '',
 		dataDir: '',
-		sleepAfter: 3 * 60 * 1000,
+		clientExpireAfter: 3 * 60 * 1000, // should ideally be big like 15 days
 		port: 2000,
 	};
 	info.installDir = await joplin.plugins.installationDir();

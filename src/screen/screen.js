@@ -36,6 +36,9 @@ document.addEventListener('click', async event => {
         else if (element.id === 'btn-disable') {
             await send('stopServer');
         }
+        else if (element.id === 'btn-disable2') {
+            await send('stopServer');
+        }
         else if (element.id === 'btn-forget') {
             await send('removeClient');
         }
