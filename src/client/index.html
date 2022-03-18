@@ -1,38 +1,150 @@
 <html>
-    <body>
-        Welcome to your Backstage.
-        <form id="upload" name="fileUpload" method="POST" action="/upload" enctype="multipart/form-data">
-            <input type ="text" name="data" id="data" placeholder="Data">
-            <input type="file" name="file" id="file" />
-            <input type="submit" value="Upload" />
-        </form>
-    </body>
-</html>
 
+<head>
+    <title>Joplin Backstage</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/xui.css">
+    <link rel="stylesheet" href="/client.css">
+</head>
+
+<body>
+    <input type="file" name="images" class="formHidden" id="imgSelect" accept="image/*" multiple />
+    <input type="file" name="files" class="formHidden" id="fileSelect" multiple />
+    <div id="gradient1"></div>
+    <div id="gradient2"></div>
+    <div id="main">
+        <div id="head" class="center-col">
+            <div id="devIcon">🖥</div>
+            <div id="devName" class="size-m ink-grey base-light">Your Desktop</div>
+            <div style="height: 1.1rem;"></div>
+            <div id="devInfo">
+                <div class="row">
+                    <span>IP address</span><span id="devIP">unknown</span>
+                </div>
+                <div class="row">
+                    <span>Port</span><span id="devPort">0</span>
+                </div>
+                <div class="row">
+                    <span>OS</span><span id="devOS">unknown</span>
+                </div>
+                <div class="row">
+                    <span>Mac address</span><span id="devMac">unknown</span>
+                </div>
+                <div class="row">
+                    <span>Paired on</span><span id="devPairedOn">Just now</span>
+                </div>
+            </div>
+        </div>
+        <div id="body" class="center-col">
+            <div class="optsBox" id="box1">
+                <div class="optsBox" id="mainBox">
+                    <div id="mb-sec1" class="center-col">
+                        <div>
+                            <img id="mb-icon" class="size-xl base-light icon" src="/media/export-icon.png">
+                        </div>
+                        <div id="mb-text" style="padding-top: 0.75rem;">Export to Joplin</div>
+                    </div>
+                    <hr id="mb-divider" />
+                    <div id="mb-opts" class="hstack space-around" style="width: 100%;">
+                        <div class="mb-opt">
+                            <img class="size-l base-light icon" src="/media/text-icon.png">
+                            Text
+                        </div>
+                        <label for="imgSelect" class="mb-opt">
+                            <img class="size-l base-light icon" src="/media/gallery-icon.png">
+                            Images
+                        </label>
+                        <label for="fileSelect" class="mb-opt">
+                            <img class="size-l base-light icon" src="/media/file-icon.png">
+                            Files
+                        </label>
+                    </div>
+                </div>
+                <div style="width: 100%;">
+                    <div id="brandText" class="center-col">Joplin Backstage <br />
+                        Please make sure your phone and desktop are on the same network.<br />
+                        Opensource project by Asrient</div>
+                    <hr />
+                    <div id="forget-btn" class="ink-red base-light size-xs clickable">Forget device</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js" crossorigin="anonymous"></script>
 <script>
     function getOS() {
-  var userAgent = window.navigator.userAgent,
-      platform = window.navigator.platform,
-      macosPlatforms = ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'],
-      windowsPlatforms = ['Win32', 'Win64', 'Windows', 'WinCE'],
-      iosPlatforms = ['iPhone', 'iPad', 'iPod'],
-      os = null;
+        var userAgent = window.navigator.userAgent,
+            platform = window.navigator.platform,
+            macosPlatforms = ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'],
+            windowsPlatforms = ['Win32', 'Win64', 'Windows', 'WinCE'],
+            iosPlatforms = ['iPhone', 'iPad', 'iPod'],
+            os = null;
 
-  if (macosPlatforms.includes(platform)) {
-    os = 'macOS';
-  } else if (iosPlatforms.includes(platform)) {
-    os = 'iOS';
-  } else if (windowsPlatforms.includes(platform)) {
-    os = 'Windows';
-  } else if (/Android/.test(userAgent)) {
-    os = 'Android';
-  } else if (!os && /Linux/.test(platform)) {
-    os = 'Linux';
-  }
-  return os;
-}
-const d={type:"file",filename:"t1.jpg"};
-const data=JSON.stringify(d);
-document.getElementById("data").value = data;
+        if (macosPlatforms.includes(platform)) {
+            os = 'macOS';
+        } else if (iosPlatforms.includes(platform)) {
+            os = 'iOS';
+        } else if (windowsPlatforms.includes(platform)) {
+            os = 'Windows';
+        } else if (/Android/.test(userAgent)) {
+            os = 'Android';
+        } else if (!os && /Linux/.test(platform)) {
+            os = 'Linux';
+        }
+        return os;
+    }
 
+    /**
+     * Api class copied from xui.js
+     */
+    class Api {
+        constructor(baseUrl = null, extraHeaders = {}) {
+            if (baseUrl)
+                this.baseUrl = baseUrl;
+            else
+                this.baseUrl = "/api/";
+
+            this.extraHeaders = extraHeaders;
+        }
+        _send(method, url, data, opts) {
+            return new Promise((resolve, reject) => {
+                $.ajax({
+                    url: this.baseUrl + url,
+                    type: method,
+                    data,
+                    xhrFields: {
+                        withCredentials: true
+                    },
+                    headers: this.extraHeaders,
+                    dataType: 'json',
+                    success: (result, status, xhr) => {
+                        resolve({ status: xhr.status, data: result });
+                    },
+                    error: (xhr, txtStatus, err) => {
+                        reject({ status: xhr.status, data: xhr.responseJSON });
+                    },
+                    ...opts
+                });
+            });
+        }
+        post(url, data = {}) {
+            return this._send('POST', url, data)
+        }
+        get(url, data = {}) {
+            return this._send('GET', url, data)
+        }
+        put(url, data = {}) {
+            return this._send('PUT', url, data)
+        }
+        set(url, data = {}) {
+            return this._send('SET', url, data)
+        }
+    }
+
+    window.Api = Api;
 </script>
+<script src="/client.js"></script>

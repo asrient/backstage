@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import { createServer, ClientRequest, ServerResponse, Server as HttpServer, IncomingMessage } from 'http';
 import { AddressInfo } from 'net';
 import { promisify } from 'util';
-import { networkInterfaces, tmpdir } from 'os';
+import { networkInterfaces, tmpdir, hostname } from 'os';
 const formidable = require('formidable');
 const fs = joplin.require('fs-extra');
 const sqlite3 = joplin.require('sqlite3');
@@ -12,33 +12,33 @@ const path = require('path');
 
 const defaultInterfaces = ['eth0', 'wlan0', 'en0', 'en1', 'Wi-Fi',];
 
-class DbManager{
+class DbManager {
 	db = null;
-	constructor(filePath:string){
+	constructor(filePath: string) {
 		this.db = new sqlite3.Database(filePath);
 		this.db.getSync = promisify(this.db.get.bind(this.db));
 		this.db.runSync = promisify(this.db.run.bind(this.db));
 	}
-	getConfig = async (key:string) => {
+	getConfig = async (key: string) => {
 		const sql = `select value from config where key = '${key}'`;
 		const result = await this.db.getSync(sql);
-		if(!!result){
+		if (!!result) {
 			const val = result.value;
 			return JSON.parse(val);
 		}
 		return null;
 	}
-	setConfig = async (key:string, value:any) => {
+	setConfig = async (key: string, value: any) => {
 		console.log('setting config', key, value);
 		const sql = `insert OR replace into config values(?, ?)`;
 		const r = await this.db.runSync(sql, key, JSON.stringify(value));
 		console.log('set config result', r);
 	}
-	removeConfig = async (key:string) => {
+	removeConfig = async (key: string) => {
 		const sql = `delete from config where key = ?`;
 		await this.db.runSync(sql, key);
 	}
-	init = async () =>{
+	init = async () => {
 		await this.db.runSync('CREATE TABLE IF NOT EXISTS config (key TEXT UNIQUE, value TEXT)');
 	}
 }
@@ -157,9 +157,9 @@ class HttpRequest {
 		const request = this._request;
 		return new Promise((resolve, reject) => {
 			if (this.mayContainFiles) {
-				const form = formidable({ 
-					multiples: true, 
-					uploadDir: tmpdir(), 
+				const form = formidable({
+					multiples: true,
+					uploadDir: tmpdir(),
 					baseDir: global.__dirname,
 					keepExtensions: true,
 				});
@@ -213,7 +213,6 @@ class HttpResponse {
 	constructor(resp: ServerResponse) {
 		this._resp = resp;
 		this.headers = {};
-		this.body = '';
 	}
 	setHeader = (key: string, value: string | string[]) => {
 		this.headers[key] = value;
@@ -221,27 +220,33 @@ class HttpResponse {
 	setCookie = (key: string, value: string) => {
 		this.cookies[key] = value;
 	}
-	write = (data: string) => {
-		this.body += data;
+	write = (data: any) => {
+		this._resp.write(data);
 	}
-	send = async (status: number, headers?: any, data?: string) => {
-		return new Promise((resolve, reject) => {
-			this.isHandeled = true;
-			if (this.isSent) {
-				console.log(status, headers, data);
-				reject('Response already sent');
-			}
-			if (status) this.statusCode = status;
-			if (data) this.body += data;
-			if (headers) this.headers = { ...this.headers, ...headers };
+	sendHead = (status: number, headers?: any) => {
+		this.isHandeled = true;
+		if (this.isSent) {
+			return false;
+		}
+		if (status) this.statusCode = status;
+		if (headers) this.headers = { ...this.headers, ...headers };
+		if (Object.keys(this.cookies).length > 0)
 			this.headers['Set-Cookie'] = Object.keys(this.cookies).map((key) => {
 				return `${key}=${this.cookies[key]}`;
 			}).join('; ');
-			this._resp.writeHead(this.statusCode, this.headers);
-			this._resp.write(this.body);
-			this._resp.end((r: any) => {
+		this._resp.writeHead(this.statusCode, this.headers);
+		return true;
+	}
+	send = async (status: number, headers?: any, data?: any) => {
+		return new Promise((resolve: any, reject) => {
+			console.log('sending response', status, headers, data);
+			if (!this.sendHead(status, headers)) {
+				console.log(status, headers, data);
+				reject('Response already sent');
+			}
+			this._resp.end(data, () => {
 				this.isSent = true;
-				resolve(r);
+				resolve();
 			});
 			this._resp.on('error', (e: any) => {
 				console.error('error sending response', e);
@@ -290,14 +295,18 @@ class BaseServer {
 		return obj;
 	}
 	_sendFile = (res: HttpResponse, path: string, mimeType?: string) => {
-		promisify(fs.readFile)(path)
-			.then(contents => {
-				res.send(200, { "Content-Type": mimeType || "text/html" }, contents);
-			})
-			.catch(err => {
+		fs.access(path, fs.F_OK, (err) => {
+			if (err) {
 				console.error('could not read file', path, err);
 				res.send(404, {}, "404 - File Not Found");
-			})
+			}
+			else {
+				const stat = fs.statSync(path);
+				res.sendHead(200, { "Content-Type": mimeType || "text/html", 'Content-Length': stat.size });
+				const readStream = fs.createReadStream(path);
+				readStream.pipe(res._resp);
+			}
+		});
 	}
 	_serveFolder = (res: HttpResponse, filePath: string, defaultFile?: string) => {
 		if (filePath == '/') filePath = defaultFile || '/index.html';
@@ -327,7 +336,7 @@ class BaseServer {
 		this._sendFile(res, filePath, contentType);
 	}
 	_requestHandler = async (req: IncomingMessage, res: ServerResponse) => {
-		try{
+		try {
 			const request = new HttpRequest(req);
 			const response = new HttpResponse(res);
 			console.info('request', request.url);
@@ -337,10 +346,10 @@ class BaseServer {
 			console.info('about to serve public folder', this.publicDir);
 			this._serveFolder(response, request.url, 'index.html');
 		}
-		catch(e){
+		catch (e) {
 			console.error('Server error', e);
 			res.writeHead(500, { 'Content-Type': 'text/html' });
-			res.end('Internal Server Error\n'+e.toString());
+			res.end('Internal Server Error\n' + e.toString());
 		}
 	}
 	async start() {
@@ -441,15 +450,15 @@ class BS_Server extends BaseServer {
 			}
 		}
 		else {
-			if (Date.now() >= this.lastPing + (this.info.clientExpireAfter || 1000 * 60 * 3)) { 
+			if (Date.now() >= this.lastPing + (this.info.clientExpireAfter || 1000 * 60 * 3)) {
 				console.info('Client is inactive for a long time, removing client');
 				this.removeClient();
 			}
 		}
 		if (this._timeoutId) clearTimeout(this._timeoutId);
 		let nextRefresh = 30 * 1000; // we will regenerate otp
-		if(this.clientConnected) 
-		nextRefresh = 5*60*1000; // 5 mins, we will check for client expiry
+		if (this.clientConnected)
+			nextRefresh = 5 * 60 * 1000; // 5 mins, we will check for client expiry
 		this._timeoutId = setTimeout(this.refresh, nextRefresh);
 	}
 	onRequest = async (req: HttpRequest, res: HttpResponse) => {
@@ -469,8 +478,15 @@ class BS_Server extends BaseServer {
 		switch (req.url) {
 			case '/ping':
 				this.lastPing = Date.now();
-				res.apiRespond(200, { message: 'pong', clientInfo: this.clientDeviceInfo });
+				res.apiRespond(200, { message: 'pong' });
 				this.db.setConfig('lastPing', this.lastPing);
+				break;
+			case '/deviceInfo':
+				const deviceInfo = { ...this.info.deviceInfo };
+				if (req.getData.ip) {
+					deviceInfo.mac = getMacFromIp(req.getData.ip);
+				}
+				res.apiRespond(200, { clientInfo: this.clientDeviceInfo, deviceInfo });
 				break;
 			case '/upload':
 				if (req.method == 'POST') {
@@ -577,14 +593,14 @@ class BS_Server extends BaseServer {
 		const clientInfo = await this.db.getConfig('clientInfo');
 		const authKey = await this.db.getConfig('authKey');
 		const lastPing = await this.db.getConfig('lastPing');
-		if(!!clientInfo && !!authKey && !!lastPing) {
+		if (!!clientInfo && !!authKey && !!lastPing) {
 			console.log('retrived client info', clientInfo, authKey, lastPing);
 			this.clientDeviceInfo = clientInfo;
 			this.authKey = authKey;
 			this.lastPing = lastPing;
 			this.clientConnected = true;
 		}
-		else{
+		else {
 			console.log('no client found in db', clientInfo, authKey, lastPing);
 		}
 	}
@@ -614,7 +630,7 @@ class Backstage {
 		this.load();
 	}
 	sendDialogEvent = (event: string, data: object = {}) => {
-		if(this.dialogHandle) {
+		if (this.dialogHandle) {
 			joplin.views.panels.postMessage(this.dialogHandle, {
 				...data,
 				type: event,
@@ -662,7 +678,7 @@ class Backstage {
 	onClientDisconnected = (clientInfo: any) => {
 		console.info('Client disconnected', clientInfo);
 		this.sendDialogEvent('clientDisconnected', { clientInfo });
-		if(!this.isDialogOpen){
+		if (!this.isDialogOpen) {
 			this.stopService();
 		}
 	}
@@ -671,7 +687,7 @@ class Backstage {
 		this.sendDialogEvent('clientConnected', { clientInfo });
 	}
 	showDialog = async () => {
-		if (!this.server.active&&!this.isDisabled) {
+		if (!this.server.active && !this.isDisabled) {
 			this.startService();
 		}
 		const dialogs = joplin.views.dialogs;
@@ -680,7 +696,7 @@ class Backstage {
 		this.isDialogOpen = false;
 		console.info('Dialog result: ' + JSON.stringify(result));
 		// Dialog closed, stop server if no client is connected
-		if(this.server.active && !this.server.clientConnected){
+		if (this.server.active && !this.server.clientConnected) {
 			this.stopService();
 		}
 	}
@@ -798,7 +814,7 @@ class Backstage {
 					this.getCurrentNote();
 				});
 				await this.server.loadState();
-				if(this.server.clientConnected){
+				if (this.server.clientConnected) {
 					console.log('starting server since we have a client');
 					this.startService();
 				}
@@ -808,9 +824,41 @@ class Backstage {
 	}
 }
 
+function getMacFromIp(ip: string) {
+	const network = networkInterfaces();
+	let mac = null;
+	Object.keys(network).find((connName) => {
+		return !!(network[connName].find((conn) => {
+			if (conn.address == ip && !conn.internal) {
+				mac = conn.mac;
+				return true;
+			}
+			return false;
+		}))
+	})
+	return mac;
+}
+
+function getDeviceInfo() {
+	let OS: string = process.platform;
+	switch (process.platform) {
+		case 'darwin':
+			OS = 'macOS';
+			break;
+		case 'win32':
+			OS = 'Windows';
+			break;
+		case 'linux':
+			OS = 'Linux';
+			break;
+	}
+	let name: string = hostname().split('.')[0];
+	return { deviceOS: OS, deviceName: name, deviceType: 'desktop', };
+}
+
 async function run() {
 	const info = {
-		deviceInfo: {},
+		deviceInfo: getDeviceInfo(),
 		installDir: '',
 		dataDir: '',
 		clientExpireAfter: 3 * 60 * 1000, // should ideally be big like 15 days
