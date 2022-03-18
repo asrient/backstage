@@ -239,7 +239,6 @@ class HttpResponse {
 	}
 	send = async (status: number, headers?: any, data?: any) => {
 		return new Promise((resolve: any, reject) => {
-			console.log('sending response', status, headers, data);
 			if (!this.sendHead(status, headers)) {
 				console.log(status, headers, data);
 				reject('Response already sent');
