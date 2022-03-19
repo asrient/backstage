@@ -151,7 +151,7 @@ class HttpRequest {
 		}
 	}
 	get mayContainFiles() {
-		return this.method === 'POST' && this.headers['content-type'].includes('multipart/form-data');
+		return this.method === 'POST' && this.headers['content-type']?.includes('multipart/form-data');
 	}
 	load = async () => {
 		const request = this._request;
@@ -640,9 +640,8 @@ class Backstage {
 		this.sendDialogEvent('otpRefresh', { otp });
 	}
 	onUpload = async (data: uploadData) => {
-		console.info('saving file..', data);
-		if (data.type == 'text') {
-			console.warn('not implemented text upload', data.text);
+		if (data.type == 'text' && data.text) {
+			this.addTextToNote(data.text);
 		}
 		else if (data.filePath) {
 			await this.saveMedia(data.filename, data.filePath);
@@ -763,6 +762,19 @@ class Backstage {
 			}
 		});
 	}
+	addTextToNote = async (text: string) => {
+		const note = await joplin.workspace.selectedNote();
+		if (!!note) {
+			// Set the note body
+			if (note.body == null) note.body = '';
+			note.body += text;
+			const updated = await joplin.data.put(['notes', note.id], null, { body: note.body });
+			console.log('note updated', updated);
+			// Hack: force a refresh of the note since note does not rerender on update automatically, 
+			// https://github.com/laurent22/joplin/issues/5955
+			await joplin.commands.execute("editor.setText", note.body);
+		}
+	}
 	saveMedia = async (title: string, filePath: string) => {
 		console.log('saving media', title, filePath);
 		const res = await joplin.data.post(
@@ -776,21 +788,11 @@ class Backstage {
 			]
 		);
 		console.log('media saved', res);
-		const note = await joplin.workspace.selectedNote();
-		if (!!note) {
-			// Set the note body
-			note.body = note.body || '';
-			let link = `[${title} - using Backsatage](:/${res.id})`;
-			if (res.mime.startsWith('image/')) {
-				link = '!' + link;
-			}
-			note.body += `\n${link}\n`;
-			const updated = await joplin.data.put(['notes', note.id], null, { body: note.body });
-			console.log('note updated', updated);
-			// Hack: force a refresh of the note since note does not rerender on update automatically, 
-			// https://github.com/laurent22/joplin/issues/5955
-			await joplin.commands.execute("editor.setText", note.body);
+		let link = `[${title} - using Backsatage](:/${res.id})`;
+		if (res.mime.startsWith('image/')) {
+			link = '!' + link;
 		}
+		await this.addTextToNote(`\n${link}\n`);
 	}
 	getCurrentNote = async () => {
 		const note = await joplin.workspace.selectedNote();

@@ -47,7 +47,7 @@
                     </div>
                     <hr id="mb-divider" />
                     <div id="mb-opts" class="hstack space-around" style="width: 100%;">
-                        <div class="mb-opt">
+                        <div class="mb-opt" id="textSelect">
                             <img class="size-l base-light icon" src="/media/text-icon.png">
                             Text
                         </div>
@@ -78,6 +78,23 @@
         </div>
         <div class="center">
             <div class="ink-white clickable base-light size-xs" id="us-btn">Done</div>
+        </div>
+    </div>
+    <div id="textScreen" class="center-col screen">
+        <div class="center">
+            <div class="ink-white base-light size-xs" style="font-size: 0.75rem;color: #abababa6;font-weight: 400;">
+                Send to Joplin
+            </div>
+        </div>
+        <div class="center-col">
+            <div id="txt-box" class="optsBox">
+                <div class="ink-white base-light hstack space-between" id="tb-bar">
+                    <div class="ink-blue clickable" id="tb-done">Cancel</div>
+                    <div class="ink-white" style="width: 100%;">Text</div>
+                    <div class="ink-green clickable" id="tb-send">Send</div>
+                </div>
+                <textarea id="txt-content" class="ink-white base-light size-xs" placeholder="Type or paste"></textarea>
+            </div>
         </div>
     </div>
 </body>

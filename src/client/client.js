@@ -115,13 +115,37 @@ async function setDeviceInfo() {
     }
 }
 
+async function upload(file=null, data={}){
+    const form = new FormData();
+    if(!!file)
+    form.append('file', file);
+    form.append('data', JSON.stringify(data));
+    let success = false;
+    let error = false;
+    try{
+        res = await api._send('POST', 'upload', form, { processData: false, contentType: false });
+        if(res.status == 200) {
+            success = true;
+        }
+    }
+    catch(e){
+        console.error('error uploading', e);
+        error=true;
+    }
+    console.log('res', res);
+    return {
+        success,
+        error,
+    }
+}
+
 async function uploadFiles(e) {
     const files = e.target.files;
     if(files<=0) return;
     $('#uploadScreen').css('display', 'grid');
     $('#us-btn').css('display', 'none');
     $('#us-icon').attr("src", '/media/upload-icon.png');
-    let errCount = 0;
+    let failCount = 0;
     for (let i = 0; i < files.length; i++) {
         $('#us-text').text(`Uploading ${files.length-i} ${(files.length-i)==1? 'file': 'files'} to Joplin`);
         const file = files[i];
@@ -131,28 +155,15 @@ async function uploadFiles(e) {
         const data = { type, filename, mimeType };
         console.log('data', data);
         //var reader = new FileReader();
-        const form = new FormData();
-        form.append('file', file);
-        form.append('data', JSON.stringify(data));
-        let success = false;
-        try{
-            res = await api._send('POST', 'upload', form, { processData: false, contentType: false });
-            if(res.status == 200) {
-                success = true;
-            }
-        }
-        catch(e){
-            console.error('error uploading file', e);
-            errCount++;
-        }
-        console.log('res', res);
+        const {success, error} = await upload(file, data);
+        if(!success) failCount++;
     }
     $('#imgSelect').val('');
     $('#fileSelect').val('');
     $('#us-btn').css('display', 'block');
-    if(errCount>0) {
+    if(failCount>0) {
         $('#us-icon').attr("src", warningIconURI);
-        $('#us-text').text(`${errCount} ${errCount==1? 'file': 'files'} failed to upload`);
+        $('#us-text').text(`${failCount} ${failCount==1? 'file': 'files'} failed to upload`);
         colorLock.lock('upload', '#7f6c15');
     }
     else{
@@ -162,6 +173,39 @@ async function uploadFiles(e) {
     }
 }
 
+async function logout(){
+    const res = await api.post('logout');
+    console.log('logout', res);
+    if(res&&res.status == 200) {
+        document.location.href = '/wall.html';
+    }
+    else{
+        console.error('logout failed', res);
+        alert('Could not logout, please try again');
+    }
+}
+
+function showTextScreen(){
+$('#textScreen').css('display', 'grid');
+colorLock.lock('textScreen', '#09283d');
+}
+
+function closeTextScreen(){
+$('#textScreen').css('display', 'none');
+colorLock.unlock('textScreen');
+}
+
+async function sendText(){
+    const text = $('#txt-content').val();
+    if(text.length>0){
+        const data = { type:'text', size: text.length, mimeType: 'plain/text', text };
+        const {success, error} = await upload(null, data);
+        console.log('sent text', data, success, error);
+        $('#txt-content').val('');
+    }
+    closeTextScreen();
+}
+
 async function run() {
     $('#imgSelect').on('change', uploadFiles);
     $('#fileSelect').on('change', uploadFiles);
@@ -169,7 +213,11 @@ async function run() {
         $('#uploadScreen').css('display', 'none');
         colorLock.unlock('upload');
     })
-    api = new window.Api('/', { 'X-Client': 'Joplin Backstage v0' });
+    $('#forget-btn').on('click', logout);
+    $('#textSelect').on('click', showTextScreen);
+    $('#tb-done').on('click', closeTextScreen);
+    $('#tb-send').on('click', sendText);
+    api = new window.Api('/', { 'X-Client': 'Joplin Backstage Client v0' });
     window.setInterval(changeColor, 10 * 1000);
     window.setInterval(ping, 5 * 1000);
     changeColor();
