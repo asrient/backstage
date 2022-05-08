@@ -1,23 +1,25 @@
 let colors = ['#502577', '#194570', '#0e3d38', '#134a38', '#344a13', '#4b420f',];
 let colorInd = 0;
+let pingTimer = null;
+
 const colorLock = {
-    _lock:false, 
+    _lock: false,
     id: null,
     color: null,
-    lock(id, color){
-        if(this._lock&&this.id!=id) return false;
-        this._lock=true;
+    lock(id, color) {
+        if (this._lock && this.id != id) return false;
+        this._lock = true;
         this.id = id;
-        if(this.color!=color) 
-        changeColor(color);
+        if (this.color != color)
+            changeColor(color);
         this.color = color;
         return true;
     },
-    unlock(id){
-        if(!this._lock||id!=this.id) return false;
-        this._lock=false;
-        this.id=null;
-        this.color=null;
+    unlock(id) {
+        if (!this._lock || id != this.id) return false;
+        this._lock = false;
+        this.id = null;
+        this.color = null;
         changeColor();
         return true;
     }
@@ -48,7 +50,20 @@ async function preloadImage(url) {
 
 let lastPing = 0;
 let isAccessable = true;
+
+function isPageDead() {
+    if (!isAccessable) {
+        return lastPing + 2 * 60 * 1000 <= Date.now(); // 2 mins
+    }
+    return false;
+}
+
 async function ping() {
+    if (isPageDead()) {
+        if (!!pingTimer) clearTimeout(pingTimer);
+        $('#mb-text').text('Please refersh the page');
+        return;
+    }
     if (lastPing + 15 * 1000 <= Date.now()) { //15 secs
         try {
             const res = await api.get('ping');
@@ -76,7 +91,7 @@ async function ping() {
                 $('#mb-icon').attr("src", warningIconURI);
                 $('#mb-text').text('Joplin not reachable');
             }
-            colorLock.lock('ping','#971414');
+            colorLock.lock('ping', '#971414');
             isAccessable = false;
         }
 
@@ -115,22 +130,22 @@ async function setDeviceInfo() {
     }
 }
 
-async function upload(file=null, data={}){
+async function upload(file = null, data = {}) {
     const form = new FormData();
-    if(!!file)
-    form.append('file', file);
+    if (!!file)
+        form.append('file', file);
     form.append('data', JSON.stringify(data));
     let success = false;
     let error = false;
-    try{
+    try {
         res = await api._send('POST', 'upload', form, { processData: false, contentType: false });
-        if(res.status == 200) {
+        if (res.status == 200) {
             success = true;
         }
     }
-    catch(e){
+    catch (e) {
         console.error('error uploading', e);
-        error=true;
+        error = true;
     }
     console.log('res', res);
     return {
@@ -141,13 +156,13 @@ async function upload(file=null, data={}){
 
 async function uploadFiles(e) {
     const files = e.target.files;
-    if(files<=0) return;
+    if (files <= 0) return;
     $('#uploadScreen').css('display', 'grid');
     $('#us-btn').css('display', 'none');
     $('#us-icon').attr("src", '/media/upload-icon.png');
     let failCount = 0;
     for (let i = 0; i < files.length; i++) {
-        $('#us-text').text(`Uploading ${files.length-i} ${(files.length-i)==1? 'file': 'files'} to Joplin`);
+        $('#us-text').text(`Uploading ${files.length - i} ${(files.length - i) == 1 ? 'file' : 'files'} to Joplin`);
         const file = files[i];
         const filename = file.name;
         const mimeType = file.type;
@@ -155,51 +170,52 @@ async function uploadFiles(e) {
         const data = { type, filename, mimeType };
         console.log('data', data);
         //var reader = new FileReader();
-        const {success, error} = await upload(file, data);
-        if(!success) failCount++;
+        const { success, error } = await upload(file, data);
+        if (!success) failCount++;
     }
     $('#imgSelect').val('');
     $('#fileSelect').val('');
     $('#us-btn').css('display', 'block');
-    if(failCount>0) {
+    if (failCount > 0) {
         $('#us-icon').attr("src", warningIconURI);
-        $('#us-text').text(`${failCount} ${failCount==1? 'file': 'files'} failed to upload`);
+        $('#us-text').text(`${failCount} ${failCount == 1 ? 'file' : 'files'} failed to upload`);
         colorLock.lock('upload', '#7f6c15');
     }
-    else{
+    else {
         $('#us-icon').attr("src", '/media/done-icon.png');
         $('#us-text').text('All files uploaded');
         colorLock.lock('upload', '#3b7d13');
     }
 }
 
-async function logout(){
+async function logout() {
     const res = await api.post('logout');
     console.log('logout', res);
-    if(res&&res.status == 200) {
+    if (res && res.status == 200) {
         document.location.href = '/wall.html';
     }
-    else{
+    else {
         console.error('logout failed', res);
         alert('Could not logout, please try again');
     }
 }
 
-function showTextScreen(){
-$('#textScreen').css('display', 'grid');
-colorLock.lock('textScreen', '#09283d');
+function showTextScreen() {
+    $('#textScreen').css('display', 'grid');
+    colorLock.lock('textScreen', '#09283d');
+    $('#txt-content').focus();
 }
 
-function closeTextScreen(){
-$('#textScreen').css('display', 'none');
-colorLock.unlock('textScreen');
+function closeTextScreen() {
+    $('#textScreen').css('display', 'none');
+    colorLock.unlock('textScreen');
 }
 
-async function sendText(){
+async function sendText() {
     const text = $('#txt-content').val();
-    if(text.length>0){
-        const data = { type:'text', size: text.length, mimeType: 'plain/text', text };
-        const {success, error} = await upload(null, data);
+    if (text.length > 0) {
+        const data = { type: 'text', size: text.length, mimeType: 'plain/text', text };
+        const { success, error } = await upload(null, data);
         console.log('sent text', data, success, error);
         $('#txt-content').val('');
     }
@@ -219,7 +235,7 @@ async function run() {
     $('#tb-send').on('click', sendText);
     api = new window.Api('/', { 'X-Client': 'Joplin Backstage Client v0' });
     window.setInterval(changeColor, 10 * 1000);
-    window.setInterval(ping, 5 * 1000);
+    pingTimer = window.setInterval(ping, 5 * 1000);
     changeColor();
     warningIconURI = await preloadImage('/media/warning-icon.png');
     ping();

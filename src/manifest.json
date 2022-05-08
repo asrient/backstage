@@ -8,5 +8,6 @@
 	"author": "Asrient",
 	"homepage_url": "https://asrient.github.io/backstage",
 	"repository_url": "https://github.com/asrient/backstage",
-	"keywords": []
+	"keywords": ["import", "scan", "files", "images"],
+	"categories": ["files", "productivity", "integrations"]
 }

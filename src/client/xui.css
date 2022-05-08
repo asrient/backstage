@@ -653,7 +653,7 @@ button {
     max-width: 34vw;
   }
 }
-button[type=submit]{
+input[type=submit]{
   padding: 0.5rem;
   width: 100%;
   margin: 0.8rem 0.3rem;
@@ -665,7 +665,7 @@ button[type=submit]{
   width: 17rem;
   max-width: 85vw;
 }
-button[type=submit]:hover{
+input[type=submit]:hover{
   background: rgb(0, 153, 255);
 }
 input {

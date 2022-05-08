@@ -1,5 +1,30 @@
 <html>
+    <head>
+        <title>Enter OTP - Joplin Backstage</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="/xui.css">
+    </head>
     <body>
-        Please enter a valid OTP.
+        <div class="center-col" style="min-height: 70vh;">
+            <h1 id="h">Joplin Backstage</h1>
+            Scan the QR code or enter a valid OTP
+            <form action="/" method="GET">
+                <input id="otp" type="text" inputmode="numeric" name="otp" placeholder="6 digit OTP" 
+                autocomplete="one-time-code"
+                pattern="\d{6}"
+                required />
+                <input type="submit" value="Authenticate" />
+            </form>
+        </div>
     </body>
+    <style>
+        #h{
+            color: #219f1f;
+            font-weight: 200;
+        }
+    </style>
+    <script>
+        document.getElementById("otp").focus();
+    </script>
 </html>

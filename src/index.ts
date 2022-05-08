@@ -1,10 +1,11 @@
 import joplin from 'api';
-import { MenuItemLocation, ToolbarButtonLocation } from 'api/types';
+import { MenuItemLocation, ToolbarButtonLocation, SettingItemType } from 'api/types';
 import { randomBytes } from 'crypto';
 import { createServer, ClientRequest, ServerResponse, Server as HttpServer, IncomingMessage } from 'http';
 import { AddressInfo } from 'net';
 import { promisify } from 'util';
 import { networkInterfaces, tmpdir, hostname } from 'os';
+import { ChangeEvent } from 'api/JoplinSettings';
 const formidable = require('formidable');
 const fs = joplin.require('fs-extra');
 const sqlite3 = joplin.require('sqlite3');
@@ -29,10 +30,9 @@ class DbManager {
 		return null;
 	}
 	setConfig = async (key: string, value: any) => {
-		console.log('setting config', key, value);
+		console.info('setting config', key, value);
 		const sql = `insert OR replace into config values(?, ?)`;
 		const r = await this.db.runSync(sql, key, JSON.stringify(value));
-		console.log('set config result', r);
 	}
 	removeConfig = async (key: string) => {
 		const sql = `delete from config where key = ?`;
@@ -102,6 +102,15 @@ function detectClientInfo(userAgent: string) {
 	return { browser, deviceType, deviceOS, deviceName };
 }
 
+function generateOTP() {
+	var digits = '6789014523';
+	let OTP = '';
+	for (let i = 0; i < 6; i++) {
+		OTP += digits[Math.floor(Math.random() * 10)];
+	}
+	return OTP;
+}
+
 interface uploadData {
 	filePath?: string;
 	text?: string;
@@ -165,18 +174,18 @@ class HttpRequest {
 				});
 				form.parse(request, function (err, fields: any, files: any) {
 					if (err) {
-						console.error(err.message);
+						console.error('Error in form parsing', err.message);
 						reject(err);
 					}
-					console.log('got upload', fields, files);
+					// console.log('got upload', fields, files);
 					resolve(this);
 				});
 				form.on('file', (formname, file) => {
-					console.log('got file', formname, file);
+					// console.log('got file', formname, file);
 					this.files.push(file);
 				});
 				form.on('field', (key, value) => {
-					console.log('got field', key, value);
+					// console.log('got field', key, value);
 					this.postData[key] = value;
 				});
 			}
@@ -240,7 +249,7 @@ class HttpResponse {
 	send = async (status: number, headers?: any, data?: any) => {
 		return new Promise((resolve: any, reject) => {
 			if (!this.sendHead(status, headers)) {
-				console.log(status, headers, data);
+				// console.log(status, headers, data);
 				reject('Response already sent');
 			}
 			this._resp.end(data, () => {
@@ -342,7 +351,7 @@ class BaseServer {
 			await request.load();
 			await this.onRequest(request, response);
 			if (response.isSent || response.isHandeled) return;
-			console.info('about to serve public folder', this.publicDir);
+			console.info('Serving public folder', this.publicDir);
 			this._serveFolder(response, request.url, 'index.html');
 		}
 		catch (e) {
@@ -388,13 +397,13 @@ class BS_Server extends BaseServer {
 	onClientDisconnected = (clientInfo: any) => { }
 	onOtpRefresh = (otp: string) => { }
 	constructor(info: any, db: DbManager) {
-		super(info.port, path.join(info.installDir, 'client'));
+		super(0, path.join(info.installDir, 'client'));
 		this.info = info;
 		this.db = db;
 	}
 	verifyAuth = (req: HttpRequest) => {
 		if (!this.clientConnected && this.otp) {
-			console.log('verifying otp', req.getData, this.otp);
+			console.info('verifying otp', req.getData, this.otp);
 			if (req.getData['otp'] == this.otp) {
 				console.info('Otp verified', this.otp);
 				this.otp = null;
@@ -435,9 +444,9 @@ class BS_Server extends BaseServer {
 		if (this.clientConnected && this.authKey && req.cookies['bs-key'] == this.authKey) return true;
 		return false;
 	}
-	refresh = () => {
+	refresh = async () => {
 		if (!this.active) {
-			console.log('Backstage server not active, reseting state');
+			console.info('[Refersh] Backstage server not active, reseting state..');
 			this.otp = null;
 			this.otpNextRefresh = 0;
 			if (this._timeoutId) clearTimeout(this._timeoutId);
@@ -449,8 +458,9 @@ class BS_Server extends BaseServer {
 			}
 		}
 		else {
-			if (Date.now() >= this.lastPing + (this.info.clientExpireAfter || 1000 * 60 * 3)) {
-				console.info('Client is inactive for a long time, removing client');
+			const expiryDelta = await this.info.clientExpireAfter();
+			if (Date.now() >= this.lastPing + expiryDelta) {
+				console.warn('Client is inactive for a long time, removing client');
 				this.removeClient();
 			}
 		}
@@ -489,7 +499,7 @@ class BS_Server extends BaseServer {
 				break;
 			case '/upload':
 				if (req.method == 'POST') {
-					console.log('got upload req', req, req.files, req.mayContainFiles, req.postData);
+					// console.info('got upload request', req, req.files, req.mayContainFiles, req.postData);
 					const file = req.files.length ? req.files[0] : null;
 					let info: any = {};
 					if (req.postData['data']) {
@@ -503,7 +513,7 @@ class BS_Server extends BaseServer {
 						type: (info.type ? info.type : "file") as uploadData["type"],
 						filePath: file ? file.filepath : null,
 					};
-					console.info('upload', data);
+					console.info('upload request', data);
 					this.onUpload(data);
 					res.apiRespond(200, { message: 'uploaded' });
 				}
@@ -548,7 +558,7 @@ class BS_Server extends BaseServer {
 			throw new Error('Cannot reset otp while client is connected');
 		}
 		this.otpNextRefresh = Date.now() + 30 * 1000;
-		this.otp = randomBytes(4).toString('hex');
+		this.otp = generateOTP();
 		console.info('Refreshing otp', this.otp);
 		console.info(this.otpLinks());
 		this.onOtpRefresh(this.otp);
@@ -568,11 +578,12 @@ class BS_Server extends BaseServer {
 		this.refresh();
 	}
 	start = async () => {
-		console.info('Starting Base server...');
+		console.info('Starting Backstage server...');
+		this.port = await this.info.port();
 		await super.start.bind(this)();
 		this.refresh();
 	}
-	resetPort = async (port) => {
+	resetPort = async (port: number) => {
 		this.port = port;
 		if (this.active)
 			await this.stop();
@@ -589,18 +600,27 @@ class BS_Server extends BaseServer {
 	}
 	loadState = async () => {
 		// load previoulsy paired devices from db
+		if (await this.info.port() === 0) {
+			// Port is set to 0 (random), so even if client was previously set, due to port change 
+			// we need to remove client on joplin restart
+			console.info('Port is set to 0, removing client if any');
+			this.db.removeConfig('clientInfo');
+			this.db.removeConfig('lastPing');
+			this.db.removeConfig('authKey');
+			return;
+		}
 		const clientInfo = await this.db.getConfig('clientInfo');
 		const authKey = await this.db.getConfig('authKey');
 		const lastPing = await this.db.getConfig('lastPing');
 		if (!!clientInfo && !!authKey && !!lastPing) {
-			console.log('retrived client info', clientInfo, authKey, lastPing);
+			console.info('retrived client info from db', clientInfo, authKey, lastPing);
 			this.clientDeviceInfo = clientInfo;
 			this.authKey = authKey;
 			this.lastPing = lastPing;
 			this.clientConnected = true;
 		}
 		else {
-			console.log('no client found in db', clientInfo, authKey, lastPing);
+			console.info('no client found in db', clientInfo, authKey, lastPing);
 		}
 	}
 }
@@ -613,7 +633,6 @@ class Backstage {
 	isDialogOpen = false;
 	isDisabled = false;
 	serviceStartedOn = 0;
-	currentNote = null;
 	db: DbManager = null;
 	constructor(info: any) {
 		this.info = info;
@@ -692,7 +711,6 @@ class Backstage {
 		this.isDialogOpen = true;
 		const result = await dialogs.open(this.dialogHandle);
 		this.isDialogOpen = false;
-		console.info('Dialog result: ' + JSON.stringify(result));
 		// Dialog closed, stop server if no client is connected
 		if (this.server.active && !this.server.clientConnected) {
 			this.stopService();
@@ -702,9 +720,8 @@ class Backstage {
 		await joplin.commands.register({
 			name: 'openBackstage',
 			label: 'Open Backstage',
-			iconName: 'fas fa-music',
+			iconName: 'fas fa-camera',
 			execute: async () => {
-				console.log('Showing backstage');
 				await this.showDialog();
 			},
 		});
@@ -728,7 +745,7 @@ class Backstage {
 		]);
 		this.dialogHandle = handle;
 		joplin.views.panels.onMessage(handle, async (msg) => {
-			console.info('Got message: ' + JSON.stringify(msg));
+			// console.info('Got message: ' + JSON.stringify(msg));
 			if (msg.type === 'get-state') {
 				const state = {
 					active: this.server.active,
@@ -762,21 +779,63 @@ class Backstage {
 			}
 		});
 	}
+	loadSettings = async () => {
+		await joplin.settings.registerSection('backstage', {
+			label: 'Backstage Import',
+			iconName: 'fas fa-camera',
+		});
+
+		await joplin.settings.registerSettings({
+			'portNumber': {
+				value: 8195,
+				type: SettingItemType.Int,
+				section: 'backstage',
+				public: true,
+				label: 'Server port number (Set 0 for random)',
+			},
+
+			'resetDelay': {
+				value: '6mo',
+				type: SettingItemType.String,
+				section: 'backstage',
+				isEnum: true,
+				public: true,
+				label: 'Remove inactive devices after',
+				options: {
+					'5min': '5 Minutes',
+					'1hr': '1 Hour',
+					'5d': '5 Days',
+					'30d': '30 Days',
+					'6mo': '6 Months',
+				},
+			},
+		});
+		joplin.settings.onChange(async (e: ChangeEvent) => {
+			console.info('Settings changed:', e);
+			if (e.keys.includes('portNumber')) {
+				console.info('Resetting Server Port..');
+				await this.server.resetPort(await this.info.port());
+				if (this.server.clientConnected) {
+					console.info('Removing client on port change');
+					this.server.removeClient();
+				}
+			}
+		});
+	}
 	addTextToNote = async (text: string) => {
 		const note = await joplin.workspace.selectedNote();
 		if (!!note) {
 			// Set the note body
 			if (note.body == null) note.body = '';
 			note.body += text;
-			const updated = await joplin.data.put(['notes', note.id], null, { body: note.body });
-			console.log('note updated', updated);
+			await joplin.data.put(['notes', note.id], null, { body: note.body });
 			// Hack: force a refresh of the note since note does not rerender on update automatically, 
 			// https://github.com/laurent22/joplin/issues/5955
 			await joplin.commands.execute("editor.setText", note.body);
 		}
 	}
 	saveMedia = async (title: string, filePath: string) => {
-		console.log('saving media', title, filePath);
+		console.info('saving media', title, filePath);
 		const res = await joplin.data.post(
 			["resources"],
 			null,
@@ -787,22 +846,12 @@ class Backstage {
 				},
 			]
 		);
-		console.log('media saved', res);
+		console.info('media saved', res);
 		let link = `[${title} - using Backsatage](:/${res.id})`;
 		if (res.mime.startsWith('image/')) {
 			link = '!' + link;
 		}
 		await this.addTextToNote(`\n${link}\n`);
-	}
-	getCurrentNote = async () => {
-		const note = await joplin.workspace.selectedNote();
-		console.log('retrived note', note);
-		if (!!note) {
-			this.currentNote = {
-				id: note.id,
-				title: note.title,
-			};
-		}
 	}
 	load = async () => {
 		joplin.plugins.register({
@@ -810,10 +859,7 @@ class Backstage {
 				console.info('Backstage plugin loaded');
 				this.pluginLoaded = true;
 				await this.db.init();
-				joplin.workspace.onNoteSelectionChange(async (event: any) => {
-					console.log('note selection changed', event);
-					this.getCurrentNote();
-				});
+				await this.loadSettings();
 				await this.server.loadState();
 				if (this.server.clientConnected) {
 					console.log('starting server since we have a client');
@@ -862,8 +908,44 @@ async function run() {
 		deviceInfo: getDeviceInfo(),
 		installDir: '',
 		dataDir: '',
-		clientExpireAfter: 3 * 60 * 1000, // should ideally be big like 15 days
-		port: 2000,
+		async clientExpireAfter() {
+			let val = '6mo'; // should ideally be big like 15 days
+			try {
+				val = await joplin.settings.value('resetDelay');
+			}
+			catch (e) {
+				console.warn('could not get reset delay', e.toString());
+			}
+			let dur = 0;
+			switch (val) {
+				case '5min':
+					dur = 1000 * 60 * 5;
+					break;
+				case '1hr':
+					dur = 1000 * 60 * 60;
+					break;
+				case '5d':
+					dur = 1000 * 60 * 60 * 24 * 5;
+					break;
+				case '30d':
+					dur = 1000 * 60 * 60 * 24 * 30;
+					break;
+				case '6mo':
+					dur = 1000 * 60 * 60 * 24 * 30 * 6;
+					break;
+			}
+			return dur;
+		},
+		async port() {
+			let port = 0;
+			try {
+				port = await joplin.settings.value('portNumber');
+			}
+			catch (e) {
+				console.warn('could not get port', e.toString());
+			}
+			return port;
+		}
 	};
 	info.installDir = await joplin.plugins.installationDir();
 	info.dataDir = await joplin.plugins.dataDir();

@@ -225,6 +225,10 @@ hr{
     grid-template-rows: 4rem auto;
     padding: 1.2rem;
 }
+#txt-content{
+    min-height: 15rem;
+    height: max-content;
+}
 #txt-box{
     padding: 0rem;
     overflow: hidden;
