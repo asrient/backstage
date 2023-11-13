@@ -2,5 +2,6 @@
     "title": "Backstage Plugin",
     "description": "Backstage is a plugin for Joplin that let's you copy & paste files from your phone to a joplin note on your desktop. Scan a QR code displayed on your joplin app to get started.",
     "iconPath": "img/icon.png",
-    "docsPath": "docs"
+    "docsPath": "docs",
+    "accentColor": "lime"
 }
